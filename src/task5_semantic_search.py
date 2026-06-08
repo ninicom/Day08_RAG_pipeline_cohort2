@@ -1,66 +1,27 @@
-"""
-Task 5 — Semantic Search Module.
-
-Viết module tìm kiếm ngữ nghĩa (dense retrieval) trên vector store.
-
-Yêu cầu:
-    - Input: query string + top_k
-    - Output: danh sách chunks có score, sorted descending
-    - Phải tương thích với embedding model và vector store ở Task 4
-"""
-
+import chromadb
 
 def semantic_search(query: str, top_k: int = 10) -> list[dict]:
-    """
-    Tìm kiếm ngữ nghĩa sử dụng vector similarity.
-
-    Args:
-        query: Câu truy vấn
-        top_k: Số lượng kết quả tối đa
-
-    Returns:
-        List of {
-            'content': str,      # Nội dung chunk
-            'score': float,      # Cosine similarity score
-            'metadata': dict     # source, doc_type, chunk_index
-        }
-        Sorted by score descending.
-    """
-    # TODO: Implement semantic search
-    #
-    # Bước 1: Embed query bằng cùng model ở Task 4
-    # Bước 2: Query vector store (cosine similarity)
-    # Bước 3: Return top_k results
-    #
-    # Ví dụ với Weaviate:
-    # import weaviate
-    # from sentence_transformers import SentenceTransformer
-    #
-    # model = SentenceTransformer("BAAI/bge-m3")
-    # query_embedding = model.encode(query).tolist()
-    #
-    # client = weaviate.connect_to_local()
-    # collection = client.collections.get("DrugLawDocs")
-    #
-    # results = collection.query.near_vector(
-    #     near_vector=query_embedding,
-    #     limit=top_k,
-    #     return_metadata=MetadataQuery(distance=True)
-    # )
-    #
-    # return [
-    #     {
-    #         "content": obj.properties["content"],
-    #         "score": 1 - obj.metadata.distance,  # distance → similarity
-    #         "metadata": {"source": obj.properties["source"], ...}
-    #     }
-    #     for obj in results.objects
-    # ]
-    raise NotImplementedError("Implement semantic_search")
-
-
-if __name__ == "__main__":
-    # Test
-    results = semantic_search("hình phạt cho tội tàng trữ ma tuý", top_k=5)
-    for r in results:
-        print(f"[{r['score']:.3f}] {r['content'][:100]}...")
+    client = chromadb.PersistentClient(path="./chroma_db")
+    try:
+        collection = client.get_or_create_collection(name="rag_docs")
+    except Exception:
+        return []
+    
+    results = collection.query(
+        query_texts=[query],
+        n_results=top_k,
+        include=['documents', 'metadatas', 'distances']
+    )
+    
+    formatted_results = []
+    if results['documents'] and results['documents'][0]:
+        for i in range(len(results['documents'][0])):
+            score = 1.0 / (1.0 + results['distances'][0][i])
+            formatted_results.append({
+                "content": results['documents'][0][i],
+                "score": score,
+                "metadata": results['metadatas'][0][i] if results['metadatas'] else {}
+            })
+            
+    formatted_results.sort(key=lambda x: x['score'], reverse=True)
+    return formatted_results
