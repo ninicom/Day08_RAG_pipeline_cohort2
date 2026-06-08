@@ -1,76 +1,27 @@
-"""
-Task 5 — Semantic Search Module.
-
-Viết module tìm kiếm ngữ nghĩa (dense retrieval) trên vector store.
-
-Yêu cầu:
-    - Input: query string + top_k
-    - Output: danh sách chunks có score, sorted descending
-    - Phải tương thích với embedding model và vector store ở Task 4
-"""
-
+import chromadb
 
 def semantic_search(query: str, top_k: int = 10) -> list[dict]:
-    """
-    Tìm kiếm ngữ nghĩa sử dụng vector similarity.
-
-    Args:
-        query: Câu truy vấn
-        top_k: Số lượng kết quả tối đa
-
-    Returns:
-        List of {
-            'content': str,      # Nội dung chunk
-            'score': float,      # Cosine similarity score
-            'metadata': dict     # source, doc_type, chunk_index
-        }
-        Sorted by score descending.
-    """
-    import os
-    import chromadb
-    from sentence_transformers import SentenceTransformer
-    from src.task4_chunking_indexing import EMBEDDING_MODEL
-
-    # Embed query
-    model = SentenceTransformer(EMBEDDING_MODEL)
-    query_embedding = model.encode(query).tolist()
-
-    # Query ChromaDB
-    db_path = os.path.join(os.path.dirname(__file__), "..", "chroma_db")
-    client = chromadb.PersistentClient(path=db_path)
-    
+    client = chromadb.PersistentClient(path="./chroma_db")
     try:
-        collection = client.get_collection("DrugLawDocs")
+        collection = client.get_or_create_collection(name="rag_docs")
     except Exception:
-        print("[ERROR] Không tìm thấy collection 'DrugLawDocs'. Hãy chạy task 4 trước.")
         return []
-
+    
     results = collection.query(
-        query_embeddings=[query_embedding],
-        n_results=top_k
+        query_texts=[query],
+        n_results=top_k,
+        include=['documents', 'metadatas', 'distances']
     )
-
-    out = []
-    if results and results.get("documents") and results["documents"][0]:
-        docs = results["documents"][0]
-        distances = results["distances"][0]
-        metadatas = results["metadatas"][0]
-
-        for doc, dist, meta in zip(docs, distances, metadatas):
-            # ChromaDB mặc định dùng L2 distance. Convert sang similarity score = 1 / (1 + distance)
-            score = 1.0 / (1.0 + dist)
-            out.append({
-                "content": doc,
+    
+    formatted_results = []
+    if results['documents'] and results['documents'][0]:
+        for i in range(len(results['documents'][0])):
+            score = 1.0 / (1.0 + results['distances'][0][i])
+            formatted_results.append({
+                "content": results['documents'][0][i],
                 "score": score,
-                "metadata": meta
+                "metadata": results['metadatas'][0][i] if results['metadatas'] else {}
             })
-
-    # Đảm bảo sort theo score giảm dần
-    return sorted(out, key=lambda x: x["score"], reverse=True)
-
-
-if __name__ == "__main__":
-    # Test
-    results = semantic_search("hình phạt cho tội tàng trữ ma tuý", top_k=5)
-    for r in results:
-        print(f"[{r['score']:.3f}] {r['content'][:100]}...")
+            
+    formatted_results.sort(key=lambda x: x['score'], reverse=True)
+    return formatted_results

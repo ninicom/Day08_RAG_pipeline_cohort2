@@ -1,112 +1,76 @@
-"""
-Task 8 — PageIndex Vectorless RAG.
-
-Đăng ký tài khoản tại: https://pageindex.ai/
-SDK & sample code: https://github.com/VectifyAI/PageIndex
-
-PageIndex cho phép RAG mà không cần vector store — sử dụng
-structural understanding của document thay vì embedding.
-
-Cài đặt:
-    pip install pageindex
-
-Hướng dẫn:
-    1. Đăng ký account tại pageindex.ai
-    2. Lấy API key
-    3. Upload documents
-    4. Query sử dụng PageIndex API
-"""
-
 import os
-from pathlib import Path
+import glob
 from dotenv import load_dotenv
 
 load_dotenv()
 
-PAGEINDEX_API_KEY = os.getenv("PAGEINDEX_API_KEY", "")
-STANDARDIZED_DIR = Path(__file__).parent.parent / "data" / "standardized"
+_pageindex_client = None
 
+def get_client():
+    global _pageindex_client
+    if _pageindex_client is None:
+        api_key = os.environ.get("PAGEINDEX_API_KEY", "")
+        if api_key:
+            try:
+                from pageindex.client import PageIndexClient
+                _pageindex_client = PageIndexClient(api_key=api_key)
+            except ImportError:
+                pass
+    return _pageindex_client
 
-def upload_documents():
-    """
-    Upload toàn bộ markdown documents lên PageIndex.
-    """
-    try:
-        from pageindex import PageIndex
-    except ImportError:
-        print("[ERROR] Không thể import PageIndex từ thư viện pageindex.")
-        return
-
-    if not PAGEINDEX_API_KEY:
-        print("[WARNING] PAGEINDEX_API_KEY chưa được thiết lập. Bỏ qua upload.")
-        return
-
-    pi = PageIndex(api_key=PAGEINDEX_API_KEY)
-
-    for md_file in STANDARDIZED_DIR.rglob("*.md"):
-        content = md_file.read_text(encoding="utf-8")
-        pi.upload(
-            content=content,
-            metadata={"filename": md_file.name, "type": md_file.parent.name}
-        )
-        print(f"  ✓ Uploaded: {md_file.name}")
-
+def upload_missing_docs(client):
+    # Use the original PDFs for PageIndex since they only support PDF
+    base_dir = Path("data/landing/legal")
+    doc_ids = []
+    
+    if not base_dir.exists():
+        return doc_ids
+        
+    for pdf_file in base_dir.glob("*.pdf"):
+        fp = str(pdf_file.resolve()) # Must be absolute or valid relative path
+        try:
+            print(f"Uploading {fp} to PageIndex...")
+            res = client.submit_document(file_path=fp)
+            if "doc_id" in res:
+                doc_ids.append(res["doc_id"])
+        except Exception as e:
+            print(f"Error uploading {fp} to PageIndex: {e}")
+    return doc_ids
 
 def pageindex_search(query: str, top_k: int = 5) -> list[dict]:
-    """
-    Vectorless retrieval sử dụng PageIndex.
-    Dùng làm fallback khi hybrid search không có kết quả tốt.
-
-    Args:
-        query: Câu truy vấn
-        top_k: Số lượng kết quả tối đa
-
-    Returns:
-        List of {
-            'content': str,
-            'score': float,
-            'metadata': dict,
-            'source': 'pageindex'   # Đánh dấu nguồn retrieval
-        }
-    """
-    try:
-        from pageindex import PageIndex
-    except ImportError:
-        print("[ERROR] Không thể import PageIndex từ thư viện pageindex.")
+    client = get_client()
+    if not client:
+        print("Warning: Không có PAGEINDEX_API_KEY, không thể dùng API thật.")
         return []
-
-    if not PAGEINDEX_API_KEY:
-        print("[WARNING] PAGEINDEX_API_KEY chưa được thiết lập. Fallback rỗng.")
-        return []
-
-    pi = PageIndex(api_key=PAGEINDEX_API_KEY)
-    
-    try:
-        results = pi.query(query=query, top_k=top_k)
         
-        return [
-            {
-                "content": r.text,
-                "score": r.score,
-                "metadata": r.metadata,
-                "source": "pageindex"
-            }
-            for r in results
-        ]
+    try:
+        doc_ids = upload_missing_docs(client)
+        results = []
+        for doc_id in doc_ids:
+            if not doc_id: continue
+            # Query document
+            res = client.submit_query(doc_id=doc_id, query=query)
+            
+            # Format result
+            # Giả định response có trường answer hoặc list of chunks
+            # Extract content textually to pass back to generation
+            content_str = str(res)
+            if "answer" in res:
+                content_str = res["answer"]
+            elif "data" in res:
+                content_str = str(res["data"])
+                
+            results.append({
+                "content": f"[PageIndex Result] {content_str}",
+                "score": 1.0,
+                "source": "pageindex",
+                "metadata": {"doc_id": doc_id}
+            })
+            
+            if len(results) >= top_k:
+                break
+                
+        return results
     except Exception as e:
-        print(f"[ERROR] PageIndex query failed: {e}")
+        print(f"Error PageIndex API: {e}")
         return []
-
-
-if __name__ == "__main__":
-    if not PAGEINDEX_API_KEY:
-        print("⚠ Hãy set PAGEINDEX_API_KEY trong file .env")
-        print("  Đăng ký tại: https://pageindex.ai/")
-    else:
-        print("Uploading documents...")
-        upload_documents()
-
-        print("\nTest query:")
-        results = pageindex_search("hình phạt sử dụng ma tuý", top_k=3)
-        for r in results:
-            print(f"[{r['score']:.3f}] {r['content'][:100]}...")

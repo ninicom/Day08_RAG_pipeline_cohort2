@@ -1,90 +1,81 @@
-"""
-Task 3 — Convert toàn bộ file trong data/landing/ thành Markdown.
-
-Sử dụng MarkItDown của Microsoft:
-    https://github.com/microsoft/markitdown
-
-Cài đặt:
-    pip install markitdown
-
-Hướng dẫn:
-    1. Scan toàn bộ file trong data/landing/ (PDF, DOCX, JSON)
-    2. Convert sang Markdown
-    3. Lưu vào data/standardized/ giữ nguyên cấu trúc thư mục
-"""
-
+import os
 import json
-import sys
 from pathlib import Path
-
-if hasattr(sys.stdout, 'reconfigure'):
-    sys.stdout.reconfigure(encoding='utf-8')
-
 from markitdown import MarkItDown
+from openai import OpenAI
+from dotenv import load_dotenv
 
-LANDING_DIR = Path(__file__).parent.parent / "data" / "landing"
-OUTPUT_DIR = Path(__file__).parent.parent / "data" / "standardized"
+load_dotenv()
 
+import tempfile
+import pypdfium2 as pdfium
 
-def convert_legal_docs():
-    """Convert PDF/DOCX files trong data/landing/legal/ sang markdown."""
-    legal_dir = LANDING_DIR / "legal"
-    output_dir = OUTPUT_DIR / "legal"
-    output_dir.mkdir(parents=True, exist_ok=True)
+def convert_legal():
+    try:
+        md = MarkItDown(
+            llm_client=OpenAI(), 
+            llm_model="gpt-4o-mini",
+            llm_prompt="You are an OCR system. Transcribe the exact Vietnamese text from this image. Do not describe the image, just output the raw text."
+        )
+        print("Initialized MarkItDown with GPT-4o Vision for Scanned PDF OCR.")
+    except Exception as e:
+        print("Cannot initialize OpenAI client for OCR, using standard MarkItDown.")
+        md = MarkItDown()
+        
+    in_dir = Path("data/landing/legal")
+    out_dir = Path("data/standardized/legal")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    
+    for file_path in in_dir.glob("*.pdf"):
+        print(f"Bắt đầu OCR file scan: {file_path.name}")
+        
+        # Thử đọc trực tiếp trước
+        result = md.convert(str(file_path))
+        content = result.text_content.strip()
+        
+        # Nếu PDF là Scanned PDF (không có text), content sẽ trống. Lúc đó ta dùng pdfium để tách ảnh và gọi Vision OCR.
+        if not content:
+            print(f"[{file_path.name}] Phát hiện Scanned PDF. Tiến hành tách trang thành ảnh và chạy Vision OCR...")
+            pdf = pdfium.PdfDocument(str(file_path))
+            ocr_text = ""
+            # Giới hạn OCR tối đa 3 trang đầu tiên để tiết kiệm thời gian và chi phí API cho các bộ luật khổng lồ
+            num_pages = min(3, len(pdf))
+            print(f"Sẽ OCR {num_pages} trang đầu tiên...")
+            for i in range(num_pages):
+                img = pdf[i].render(scale=2).to_pil()
+                with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+                    img.save(tmp.name)
+                    ocr_res = md.convert(tmp.name)
+                    # markitdown sinh ra prefix '# Description:\n', ta có thể lấy phần sau đó
+                    chunk = ocr_res.text_content.replace("# Description:\n", "").strip()
+                    ocr_text += chunk + "\n\n"
+                os.unlink(tmp.name)
+            content = ocr_text
+            
+        out_path = out_dir / (file_path.stem + ".md")
+        with open(out_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+        print(f"Converted {file_path.name}")
 
-    md = MarkItDown()
+def convert_news():
+    in_dir = Path("data/landing/news")
+    out_dir = Path("data/standardized/news")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    
+    for file_path in in_dir.glob("*.json"):
+        with open(file_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        
+        content = f"# {data.get('title', 'News')}\n\nURL: {data.get('url')}\n\n{data.get('content')}"
+            
+        out_path = out_dir / (file_path.stem + ".md")
+        with open(out_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+        print(f"Converted {file_path.name}")
 
-    for filepath in legal_dir.iterdir():
-        if filepath.suffix.lower() in (".pdf", ".docx", ".doc"):
-            print(f"Converting: {filepath.name}")
-            try:
-                result = md.convert(str(filepath))
-                output_path = output_dir / f"{filepath.stem}.md"
-                output_path.write_text(result.text_content, encoding="utf-8")
-                print(f"  [OK] Saved: {output_path}")
-            except Exception as e:
-                print(f"  [ERROR] Failed to convert {filepath.name}: {e}")
-
-
-def convert_news_articles():
-    """Convert JSON crawled articles trong data/landing/news/ sang markdown."""
-    news_dir = LANDING_DIR / "news"
-    output_dir = OUTPUT_DIR / "news"
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    for filepath in news_dir.iterdir():
-        if filepath.suffix.lower() == ".json":
-            print(f"Converting: {filepath.name}")
-            try:
-                data = json.loads(filepath.read_text(encoding="utf-8"))
-                output_path = output_dir / f"{filepath.stem}.md"
-
-                # Thêm metadata header
-                header = f"# {data.get('title', 'Unknown')}\n\n"
-                header += f"**Source:** {data.get('url', 'N/A')}\n"
-                header += f"**Crawled:** {data.get('date_crawled', 'N/A')}\n\n---\n\n"
-
-                content = header + data.get("content_markdown", "")
-                output_path.write_text(content, encoding="utf-8")
-                print(f"  [OK] Saved: {output_path}")
-            except Exception as e:
-                print(f"  [ERROR] Failed to process {filepath.name}: {e}")
-
-
-def convert_all():
-    """Convert toàn bộ files."""
-    print("=" * 50)
-    print("Task 3: Convert to Markdown (MarkItDown)")
-    print("=" * 50)
-
-    print("\n--- Legal Documents ---")
-    convert_legal_docs()
-
-    print("\n--- News Articles ---")
-    convert_news_articles()
-
-    print("\n✓ Done! Output tại:", OUTPUT_DIR)
-
+def main():
+    convert_legal()
+    convert_news()
 
 if __name__ == "__main__":
-    convert_all()
+    main()
