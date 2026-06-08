@@ -1,31 +1,29 @@
-# Ngày 8 — RAG Pipeline v2
+# PLVN — Trợ lý Pháp luật & Tin tức (RAG Pipeline v2)
 
-**Chương 2 | Ngày 8 trong 15**
+Một hệ thống Hỏi - Đáp (Question Answering) dựa trên kiến trúc RAG (Retrieval-Augmented Generation) chuyên sâu về lĩnh vực **Pháp luật và Tin tức phòng, chống ma tuý**. Hệ thống tập trung vào tính minh bạch, mỗi câu trả lời đều được trích dẫn nguồn rõ ràng và kiểm chứng được.
 
----
+## 🌟 Tính Năng Nổi Bật
 
-## Mục Tiêu
+- **Hybrid Search + Reranking:** Kết hợp tìm kiếm ngữ nghĩa (Semantic) và từ khóa (Lexical - BM25), sau đó đánh giá lại độ ưu tiên (Rerank) bằng mô hình Cross-Encoder để có kết quả chính xác nhất.
+- **Vectorless Fallback (PageIndex):** Tự động chuyển đổi sang phương thức tìm kiếm không cần vector khi kết quả hybrid search không đạt ngưỡng tin cậy.
+- **Trích dẫn minh bạch (Detailed Citations):** LLM sinh câu trả lời kèm trích dẫn gốc. Giao diện frontend hỗ trợ hiển thị đoạn text gốc, điểm số relevance và tự động tô sáng (highlight) từ khóa của người dùng.
+- **Giao diện hiện đại (React/Vite):** Frontend thân thiện, hỗ trợ thao tác tinh chỉnh thông số truy xuất (Top-K, Threshold, Search Mode, HyDE) theo thời gian thực.
+- **Conversation Memory:** Duy trì ngữ cảnh hội thoại đa lượt.
 
-Xây dựng một RAG pipeline thực tế, end-to-end, từ thu thập dữ liệu pháp luật và báo chí về ma tuý → xử lý → indexing → retrieval (hybrid + vectorless fallback) → generation có citation.
+## 📁 Cấu Trúc Dự Án
 
----
-
-## Chủ Đề Dữ Liệu
-
-**Pháp luật Việt Nam về ma tuý và các chất cấm** + **Các bài báo về nghệ sĩ liên quan tới ma tuý**
-
----
-
-## Cấu Trúc Thư Mục
-
-```
+```text
 day_08_rag_pipeline_v2/
-├── README.md
+├── frontend/             ← Giao diện người dùng (React, Vite)
+│   ├── src/
+│   │   ├── components/
+│   │   ├── pages/        ← Chứa ChatPage.jsx (Giao diện chính)
+│   │   └── config/
+│   └── package.json
 ├── data/
-│   ├── landing/          ← Task 1 & 2: raw files (PDF, DOCX, HTML)
-│   └── standardized/     ← Task 3: converted markdown files
-├── src/
-│   ├── __init__.py
+│   ├── landing/          ← Dữ liệu thô (PDF, DOCX, HTML, JSON)
+│   └── standardized/     ← Dữ liệu đã được chuyển đổi sang Markdown
+├── src/                  ← Backend & Data Pipeline
 │   ├── task1_collect_legal_docs.py
 │   ├── task2_crawl_news.py
 │   ├── task3_convert_markdown.py
@@ -36,397 +34,54 @@ day_08_rag_pipeline_v2/
 │   ├── task8_pageindex_vectorless.py
 │   ├── task9_retrieval_pipeline.py
 │   └── task10_generation.py
-├── notebooks/
-│   └── demo.ipynb         ← Notebook demo cho buổi trình bày
-├── group_project/
-│   └── README.md          ← Hướng dẫn bài tập nhóm
-├── requirements.txt
-└── .env.example
+├── chroma_db/            ← Cơ sở dữ liệu Vector cục bộ
+├── notebooks/            ← Notebook demo 
+└── requirements.txt
 ```
 
----
+## 🚀 Hướng Dẫn Cài Đặt & Khởi Chạy
 
-## Nhiệm Vụ Chi Tiết
-
-### Task 1 — Thu Thập Văn Bản Pháp Luật (Cá nhân)
-
-Tìm và tải về **tối thiểu 3 văn bản pháp luật** dạng PDF/DOCX về ma tuý và các chất cấm. Lưu vào `data/landing/`.
-
-**Gợi ý nguồn:**
-- Luật Phòng, chống ma tuý 2021 (Luật số 73/2021/QH15)
-- Nghị định 105/2021/NĐ-CP hướng dẫn thi hành Luật Phòng chống ma tuý
-- Bộ luật Hình sự 2015 (sửa đổi 2017) — Chương XX: Các tội phạm về ma tuý
-- Thông tư liên tịch về danh mục chất ma tuý và tiền chất
-
-**Yêu cầu:**
-- Lưu file gốc (PDF/DOCX) vào `data/landing/legal/`
-- Đặt tên file rõ ràng: `luat-phong-chong-ma-tuy-2021.pdf`, `nghi-dinh-105-2021.pdf`, ...
-
----
-
-### Task 2 — Crawl Bài Báo (Cá nhân)
-
-Crawl **tối thiểu 5 bài báo** về các nghệ sĩ Việt Nam liên quan tới ma tuý.
-
-**Thư viện khuyến nghị:** [Crawl4AI](https://github.com/unclecode/crawl4ai)
-
-**Yêu cầu:**
-- Lưu output vào `data/landing/news/`
-- Mỗi bài báo lưu thành 1 file (JSON hoặc HTML)
-- Ghi rõ metadata: URL gốc, ngày crawl, tiêu đề bài báo
-
-**Code mẫu (Crawl4AI):**
-```python
-from crawl4ai import AsyncWebCrawler
-
-async def crawl_article(url: str, output_dir: str):
-    async with AsyncWebCrawler() as crawler:
-        result = await crawler.arun(url=url)
-        # Lưu result.markdown vào file
-        ...
-```
-
----
-
-### Task 3 — Convert Sang Markdown (Cá nhân)
-
-Sử dụng [MarkItDown](https://github.com/microsoft/markitdown) của Microsoft để convert toàn bộ file trong `data/landing/` thành Markdown.
-
-**Cài đặt:**
-```bash
-pip install markitdown
-```
-
-**Code mẫu:**
-```python
-from markitdown import MarkItDown
-
-md = MarkItDown()
-
-# Convert PDF
-result = md.convert("data/landing/legal/luat-phong-chong-ma-tuy-2021.pdf")
-print(result.text_content)
-
-# Convert DOCX
-result = md.convert("data/landing/legal/nghi-dinh-105-2021.docx")
-```
-
-**Yêu cầu:**
-- Output lưu vào `data/standardized/`
-- Giữ nguyên cấu trúc thư mục con (`legal/`, `news/`)
-- Mỗi file output có tên tương ứng: `luat-phong-chong-ma-tuy-2021.md`
-
----
-
-### Task 4 — Chunking & Indexing (Cá nhân)
-
-Chọn **một loại chunking strategy** và **một embedding model** để index toàn bộ markdown files vào vector store.
-
-**Chunking — khuyến khích dùng [langchain-text-splitters](https://python.langchain.com/docs/modules/data_connection/document_transformers/):**
-```bash
-pip install langchain-text-splitters
-```
-
-Các loại splitter phù hợp:
-- `RecursiveCharacterTextSplitter` (mặc định, an toàn)
-- `MarkdownHeaderTextSplitter` (tốt cho file có heading rõ)
-- `SemanticChunker` (nâng cao, dùng embedding để tách)
-
-**Embedding model gợi ý:**
-- `sentence-transformers/all-MiniLM-L6-v2` (nhẹ, nhanh)
-- `BAAI/bge-m3` (multilingual, tốt cho tiếng Việt)
-- OpenAI `text-embedding-3-small` (nếu có API key)
-
-**Vector Store — khuyến cáo dùng Weaviate:**
-```bash
-pip install weaviate-client
-```
-- Weaviate hỗ trợ hybrid search (dense + BM25) built-in
-- Có thể dùng Docker hoặc Weaviate Cloud
-- Alternatives: ChromaDB (đơn giản), FAISS (nếu chỉ cần dense)
-
-**Yêu cầu:**
-- Ghi rõ trong code: dùng chunking nào, chunk_size bao nhiêu, overlap bao nhiêu, vì sao
-- Ghi rõ embedding model nào, dimension bao nhiêu
-- Index thành công toàn bộ documents
-
----
-
-### Task 5 — Semantic Search Module (Cá nhân)
-
-Viết module thực hiện **semantic search** (dense retrieval) trên vector store.
-
-**Yêu cầu:**
-```python
-def semantic_search(query: str, top_k: int = 10) -> list[dict]:
-    """
-    Returns:
-        List of {'content': str, 'score': float, 'metadata': dict}
-    """
-    ...
-```
-
-- Input: query string + top_k
-- Output: danh sách chunks có score, sorted descending
-- Phải hoạt động được với embedding model đã chọn ở Task 4
-
----
-
-### Task 6 — Lexical Search Module (Cá nhân)
-
-Viết module thực hiện **lexical search**. Mặc định sử dụng **BM25**.
+### 1. Cài đặt Backend (Data Pipeline)
+Yêu cầu: Python 3.10+
 
 ```bash
-pip install rank-bm25
-```
-
-**Code mẫu BM25:**
-```python
-from rank_bm25 import BM25Okapi
-
-# Tokenize corpus
-tokenized_corpus = [doc.split() for doc in corpus]
-bm25 = BM25Okapi(tokenized_corpus)
-
-# Search
-tokenized_query = query.split()
-scores = bm25.get_scores(tokenized_query)
-```
-
-**Yêu cầu:**
-```python
-def lexical_search(query: str, top_k: int = 10) -> list[dict]:
-    """
-    Returns:
-        List of {'content': str, 'score': float, 'metadata': dict}
-    """
-    ...
-```
-
-**Bonus:** Nếu dùng phương pháp khác (TF-IDF, Elasticsearch, Weaviate BM25 built-in), hãy giải thích cơ chế hoạt động trong buổi demo → **+5 điểm bonus**.
-
----
-
-### Task 7 — Reranking Module (Cá nhân)
-
-Viết module **reranking** để chấm lại độ liên quan của kết quả retrieval.
-
-**Lựa chọn (chọn 1):**
-
-| Phương pháp | Thư viện / Model | Đặc điểm |
-|-------------|-----------------|-----------|
-| Cross-encoder reranker | `jinaai/jina-reranker-v2-base-multilingual` | Multilingual, tốt cho tiếng Việt |
-| Cross-encoder reranker | `Qwen/Qwen3-Reranker-0.6B` | Nhẹ, hiệu quả |
-| MMR (Maximal Marginal Relevance) | Tự implement | Giảm trùng lặp, tăng diversity |
-| RRF (Reciprocal Rank Fusion) | Tự implement | Gộp kết quả từ nhiều ranker |
-
-**Code mẫu (Jina Reranker via API):**
-```python
-import requests
-
-def rerank(query: str, documents: list[str], top_k: int = 5) -> list[dict]:
-    response = requests.post(
-        "https://api.jina.ai/v1/rerank",
-        headers={"Authorization": "Bearer YOUR_API_KEY"},
-        json={
-            "model": "jina-reranker-v2-base-multilingual",
-            "query": query,
-            "documents": documents,
-            "top_n": top_k
-        }
-    )
-    return response.json()["results"]
-```
-
-**Yêu cầu:**
-```python
-def rerank(query: str, candidates: list[dict], top_k: int = 5) -> list[dict]:
-    """
-    Re-score and re-order candidates based on relevance to query.
-    """
-    ...
-```
-
----
-
-### Task 8 — PageIndex Vectorless RAG (Cá nhân)
-
-Đăng ký tài khoản tại [https://pageindex.ai/](https://pageindex.ai/), sau đó sử dụng [PageIndex SDK](https://github.com/VectifyAI/PageIndex) để tạo một **vectorless RAG pipeline**.
-
-**Cài đặt:**
-```bash
-pip install pageindex
-```
-
-**Tham khảo:** [https://github.com/VectifyAI/PageIndex](https://github.com/VectifyAI/PageIndex)
-
-**Yêu cầu:**
-- Upload tài liệu lên PageIndex
-- Viết function query PageIndex và trả về kết quả
-```python
-def pageindex_search(query: str, top_k: int = 5) -> list[dict]:
-    """
-    Vectorless retrieval using PageIndex.
-    Fallback khi hybrid search không trả về kết quả phù hợp.
-    """
-    ...
-```
-
----
-
-### Task 9 — Retrieval Pipeline Hoàn Chỉnh (Cá nhân)
-
-Kết hợp tất cả modules thành một **retrieval pipeline** thống nhất với logic fallback:
-
-```
-Query
-  │
-  ├─→ Semantic Search (Task 5)  ──┐
-  │                                ├─→ Merge + Rerank (Task 7) → Results
-  ├─→ Lexical Search (Task 6)  ──┘
-  │
-  └─→ Nếu hybrid search không có kết quả đủ tốt (score < threshold)
-        └─→ Fallback: PageIndex Vectorless (Task 8)
-```
-
-**Yêu cầu:**
-```python
-def retrieve(query: str, top_k: int = 5, score_threshold: float = 0.3) -> list[dict]:
-    """
-    1. Chạy semantic_search + lexical_search
-    2. Merge kết quả (RRF hoặc weighted fusion)
-    3. Rerank
-    4. Nếu top result score < threshold → fallback PageIndex
-    5. Return top_k results
-    """
-    ...
-```
-
----
-
-### Task 10 — Generation Có Citation (Cá nhân)
-
-Sắp xếp lại context chunks sau reranking để **tránh lost in the middle**, inject vào prompt, và yêu cầu LLM trả lời có **citation**.
-
-**Document Reordering (tránh lost in the middle):**
-```python
-def reorder_for_llm(chunks: list[dict]) -> list[dict]:
-    """
-    Sắp xếp chunks theo pattern: quan trọng nhất ở đầu và cuối,
-    ít quan trọng hơn ở giữa.
-    Ví dụ: [1, 3, 5, 4, 2] thay vì [1, 2, 3, 4, 5]
-    """
-    ...
-```
-
-**Prompt template:**
-```python
-SYSTEM_PROMPT = """Answer the following question comprehensively.
-For every statement of fact or claim, immediately insert a citation
-in brackets linking to the specific source
-(e.g., [Author/Platform Name, Year]).
-If the information is not explicitly stated in the provided context
-or knowledge base, state 'I cannot verify this information'
-rather than guessing."""
-
-def generate_with_citation(query: str, context_chunks: list[dict]) -> str:
-    """
-    1. Reorder chunks để tránh lost in the middle
-    2. Format context với source metadata
-    3. Inject vào prompt với SYSTEM_PROMPT
-    4. Gọi LLM (OpenAI, Gemini, hoặc local model)
-    5. Return answer có citation
-    """
-    ...
-```
-
-**Yêu cầu:**
-- Chọn top_k và top_p phù hợp (giải thích lý do trong code comment)
-- Output phải có citation dạng `[Nguồn, Năm]`
-- Nếu không đủ evidence → trả về "I cannot verify this information"
-
----
-
-
-## Cài Đặt Môi Trường
-
-```bash
+# Cài đặt các thư viện cần thiết
 pip install -r requirements.txt
-```
 
-Tạo file `.env` từ `.env.example`:
-```bash
+# Copy file môi trường và điền API keys của bạn (nếu có dùng API ngoài như OpenAI, Jina)
 cp .env.example .env
-# Điền API keys vào .env
 ```
 
----
+Để chạy pipeline xử lý dữ liệu từ đầu (Thu thập -> Markdown -> Chunking -> Indexing):
+```bash
+python src/task1_collect_legal_docs.py
+python src/task2_crawl_news.py
+python src/task3_convert_markdown.py
+python src/task4_chunking_indexing.py
+```
 
-## Chấm Điểm
-
-### Tổng Quan Phân Bổ Điểm
-
-| Thành phần | Tỷ trọng | Mô tả |
-|-----------|----------|-------|
-| **Bài Cá Nhân** | **50%** | 10 tasks, chấm bằng automated tests + manual review |
-| **Bài Nhóm** | **30%** | RAG Chatbot + Evaluation pipeline |
-| **Bonus** | **20%** | Các tiêu chí nâng cao (xem bên dưới) |
-
----
-
-### Bài Cá Nhân — 50 điểm (50%)
-
-Chấm bằng automated test suite (`pytest tests/ -v`). Mỗi task có test riêng.
-
-| Task | Nội dung | Điểm | Test |
-|------|----------|------|------|
-| 1 | Thu thập văn bản pháp luật (≥3 files tồn tại trong `data/landing/legal/`) | 3 | `test_task1_*` |
-| 2 | Crawl bài báo (≥5 files tồn tại trong `data/landing/news/`) | 3 | `test_task2_*` |
-| 3 | Convert markdown (files tồn tại trong `data/standardized/`) | 4 | `test_task3_*` |
-| 4 | Chunking + Indexing (vector store có data) | 7 | `test_task4_*` |
-| 5 | Semantic search trả về kết quả đúng format, sorted | 6 | `test_task5_*` |
-| 6 | Lexical search (BM25) trả về kết quả đúng format | 6 | `test_task6_*` |
-| 7 | Reranking hoạt động, output re-sorted | 6 | `test_task7_*` |
-| 8 | PageIndex query trả về kết quả | 4 | `test_task8_*` |
-| 9 | Retrieval pipeline + fallback logic hoạt động | 7 | `test_task9_*` |
-| 10 | Generation có citation + reorder | 4 | `test_task10_*` |
-| **Tổng** | | **50** | |
-
----
-
-### Chạy Test Chấm Điểm Bài Cá Nhân
+### 2. Khởi chạy Frontend
+Yêu cầu: Node.js 18+
 
 ```bash
-# Chạy toàn bộ test suite
-pytest tests/ -v
+cd frontend
+npm install
 
-# Chạy từng task
-pytest tests/test_individual.py::TestTask1 -v
-pytest tests/test_individual.py::TestTask5 -v
+# Khởi chạy server phát triển
+npm run dev
 ```
+Trình duyệt sẽ tự động mở giao diện tại `http://localhost:5173`.
+
+## 🛠 Công Nghệ Sử Dụng
+
+- **Backend & Pipeline:** Python, LangChain, Weaviate / ChromaDB, BM25 (rank_bm25), MarkItDown, Crawl4AI.
+- **AI Models:** 
+  - Embedding: `sentence-transformers/all-MiniLM-L6-v2` hoặc BAAI/bge-m3.
+  - Reranker: `jina-reranker-v2-base-multilingual` / Qwen Reranker.
+- **Frontend:** React.js, Vite, Lucide React, Vanilla CSS.
+
+## 📝 Đánh Giá (Evaluation)
+Dự án có hỗ trợ framework đánh giá RAG (RAGAS / DeepEval / TruLens) nằm trong bài tập nhóm `group_project/README.md`. Nhóm tiến hành tạo Golden Dataset và chạy benchmark các trục: *Faithfulness, Answer Relevance, Context Recall, Context Precision*.
 
 ---
-
-## Hướng Dẫn Thời Gian
-
-| Giai đoạn | Thời gian | Hoạt động |
-|-----------|-----------|-----------|
-| Task 1–3 | 0:00–0:45 | Thu thập data + convert markdown |
-| Task 4–6 | 0:45–1:45 | Chunking, indexing, search modules |
-| Task 7–8 | 1:45–2:15 | Reranking + PageIndex setup |
-| Task 9–10 | 2:15–3:00 | Pipeline hoàn chỉnh + generation |
-| Bài nhóm | Ngoài giờ | Tích hợp + build demo |
-
----
-
-## Tài Liệu Tham Khảo
-
-- [Crawl4AI](https://github.com/unclecode/crawl4ai) — Web crawling library
-- [MarkItDown](https://github.com/microsoft/markitdown) — Microsoft document converter
-- [LangChain Text Splitters](https://python.langchain.com/docs/modules/data_connection/document_transformers/) — Chunking strategies
-- [Weaviate](https://weaviate.io/developers/weaviate) — Vector database with hybrid search
-- [rank-bm25](https://github.com/dorianbrown/rank_bm25) — BM25 implementation
-- [PageIndex](https://github.com/VectifyAI/PageIndex) — Vectorless RAG
-- [Jina Reranker](https://jina.ai/reranker/) — Cross-encoder reranking API
-- Liu et al. (2023), *Lost in the Middle: How Language Models Use Long Contexts*
-# Day08_RAG_pipeline_cohort2
+*Dự án nằm trong khuôn khổ chương trình RAG Pipeline Cohort 2.*

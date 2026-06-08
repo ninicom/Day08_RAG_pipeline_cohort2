@@ -16,7 +16,10 @@ Backend cần đọc các giá trị này từ Header để thực thi, thay vì
 ---
 
 ## 1. Chatbot API (Sinh câu trả lời với RAG)
-Endpoint dùng để gửi câu hỏi của người dùng và nhận về câu trả lời kèm theo nguồn trích dẫn.
+Hệ thống cung cấp 2 chế độ trả lời: Đồng bộ (Synchronous) và Luồng (Streaming) để frontend có thể hiển thị trạng thái realtime.
+
+### 1.1 Chế độ Đồng bộ (Synchronous)
+Endpoint dùng để gửi câu hỏi của người dùng và đợi đến khi nhận về toàn bộ câu trả lời kèm theo nguồn trích dẫn. Phù hợp cho các truy vấn nhanh.
 
 - **URL:** `/api/chat`
 - **Method:** `POST`
@@ -24,7 +27,7 @@ Endpoint dùng để gửi câu hỏi của người dùng và nhận về câu 
   - `Content-Type: application/json`
   - `X-OpenAI-Key: sk-...`
 
-### Request Body
+**Request Body**
 ```json
 {
   "query": "Điều kiện cấp phép xây dựng nhà ở xã hội là gì?",
@@ -40,9 +43,7 @@ Endpoint dùng để gửi câu hỏi của người dùng và nhận về câu 
 - `threshold` (float): Ngưỡng điểm tin cậy để lọc tài liệu nguồn (từ 0.0 đến 1.0).
 - `searchMode` (string): Thuật toán tìm kiếm sử dụng (`"Hybrid kết hợp"`, `"Lexical từ khóa"`, `"Semantic ngữ nghĩa"`).
 
-### Success Response
-- **Code:** `200 OK`
-- **Body:**
+**Success Response (200 OK)**
 ```json
 {
   "answer": "Theo quy định của pháp luật hiện hành, điều kiện cấp phép xây dựng nhà ở xã hội bao gồm... [Luat_Nha_o_2023.pdf]",
@@ -58,6 +59,37 @@ Endpoint dùng để gửi câu hỏi của người dùng và nhận về câu 
     }
   ]
 }
+```
+
+### 1.2 Chế độ Realtime Streaming (SSE)
+Endpoint hỗ trợ Server-Sent Events (SSE). Backend sẽ liên tục đẩy các sự kiện tiến trình (status), nguồn tài liệu (sources) ngay khi truy xuất xong, và từng đoạn câu trả lời (chunk) về cho Frontend, giúp UI hiển thị hiệu ứng "suy nghĩ" chính xác.
+
+- **URL:** `/api/chat/stream`
+- **Method:** `POST`
+- **Headers:** 
+  - `Content-Type: application/json`
+  - `X-OpenAI-Key: sk-...`
+
+**Request Body**
+*(Giống hệt chế độ Đồng bộ)*
+
+**Response (text/event-stream)**
+Dữ liệu trả về liên tục dưới dạng luồng sự kiện (event stream). Frontend cần lắng nghe `onmessage`.
+
+```text
+data: {"type": "status", "message": "Đang phân tích truy vấn..."}
+
+data: {"type": "status", "message": "Đang tìm kiếm tài liệu luật và báo chí..."}
+
+data: {"type": "sources", "data": [{"id": 1, "content": "...", "score": 0.9, "metadata": {"source": "Luat_Nha_o.pdf"}}]}
+
+data: {"type": "chunk", "text": "Theo "}
+
+data: {"type": "chunk", "text": "quy "}
+
+data: {"type": "chunk", "text": "định..."}
+
+data: {"type": "done"}
 ```
 
 ---
