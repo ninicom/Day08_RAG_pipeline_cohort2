@@ -35,7 +35,28 @@ def format_context(chunks: list[dict]) -> str:
         ctx.append(f"Source: {source}\n{c.get('content', '')}")
     return "\n\n---\n\n".join(ctx)
 
-def generate_with_citation(query: str, context_chunks: list[dict] = None) -> dict:
+def generate_hyde_document(query: str, history: list[dict] = None) -> str:
+    client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY", "dummy"))
+    
+    messages = [
+        {"role": "system", "content": "You are a legal and news expert. Write a detailed, hypothetical document that perfectly answers the user's question. Do not state that you are an AI. Just provide the text of the hypothetical document."}
+    ]
+    if history:
+        messages.extend(history[-4:])
+    messages.append({"role": "user", "content": query})
+    
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=messages,
+            temperature=0.3,
+            top_p=0.9
+        )
+        return response.choices[0].message.content
+    except Exception:
+        return query
+
+def generate_with_citation(query: str, context_chunks: list[dict] = None, history: list[dict] = None) -> dict:
     if context_chunks is None:
         context_chunks = []
         
@@ -46,13 +67,15 @@ def generate_with_citation(query: str, context_chunks: list[dict] = None) -> dic
     
     prompt = f"Context:\n{context_str}\n\nQuestion: {query}"
     
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    if history:
+        messages.extend(history)
+    messages.append({"role": "user", "content": prompt})
+    
     try:
         response = client.chat.completions.create(
             model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": prompt}
-            ],
+            messages=messages,
             temperature=0.0,
             top_p=0.1
         )

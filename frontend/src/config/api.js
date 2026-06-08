@@ -18,6 +18,7 @@ export const realChat = async (query, sessionId = null, topK = 5, useHyDE = fals
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
             query: query,
+            sessionId: sessionId,
             useHyDE: useHyDE,
             useReranking: useRerank,
             topK: Number(topK),
@@ -37,11 +38,11 @@ export const realChat = async (query, sessionId = null, topK = 5, useHyDE = fals
     };
 };
 
-export const realSearch = async (query, topK = 5) => {
-    const res = await fetch(`${API_BASE}/search`, {
+export const realRetrieval = async (query, method = "Hybrid", topK = 5, threshold = 0.3) => {
+    const res = await fetch(`${API_BASE}/api/retrieval`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query, top_k: Number(topK) }),
+        body: JSON.stringify({ query, method, topK: Number(topK), threshold: Number(threshold) }),
     });
     if (!res.ok) {
         const err = await res.json().catch(() => ({}));

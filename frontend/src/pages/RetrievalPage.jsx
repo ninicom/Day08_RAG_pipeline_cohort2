@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Search, Info, LayoutGrid, List } from 'lucide-react';
-import { realSearch } from '../config/api';
+import { realRetrieval } from '../config/api';
 
 const RetrievalPage = () => {
     const [query, setQuery] = useState('');
@@ -15,7 +15,7 @@ const RetrievalPage = () => {
         
         setIsLoading(true);
         try {
-            const res = await realSearch(query, 5);
+            const res = await realRetrieval(query, method, 5, 0.3);
             setResults(res.results);
         } catch (err) {
             console.error(err);

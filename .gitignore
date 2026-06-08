@@ -19,6 +19,9 @@ Thumbs.db
 
 # Frontend build cache
 frontend/.vite/
+frontend/node_modules/
 
 # Build artifact: vector index (rebuild bằng: python -m src.task4_chunking_indexing)
 data/index/
+chroma_db/
+data/sessions.json

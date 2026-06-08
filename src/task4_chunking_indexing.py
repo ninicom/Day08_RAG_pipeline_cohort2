@@ -34,10 +34,19 @@ def chunk_documents(docs):
             })
     return chunks
 
-def index_documents(chunks):
+def get_chroma_collection(create=True):
     import chromadb
     client = chromadb.PersistentClient(path="./chroma_db")
-    collection = client.get_or_create_collection(name="rag_docs")
+    if create:
+        return client.get_or_create_collection(name="rag_docs")
+    else:
+        try:
+            return client.get_collection(name="rag_docs")
+        except Exception:
+            raise ValueError("Collection does not exist")
+
+def index_documents(chunks):
+    collection = get_chroma_collection(create=True)
     
     # clear existing docs
     if collection.count() > 0:
@@ -50,11 +59,18 @@ def index_documents(chunks):
     metadatas = [c["metadata"] for c in chunks]
     ids = [f"id_{i}" for i in range(len(chunks))]
     
-    collection.add(
-        documents=docs_text,
-        metadatas=metadatas,
-        ids=ids
-    )
+    BATCH_SIZE = 5000
+    for i in range(0, len(chunks), BATCH_SIZE):
+        batch_docs = docs_text[i:i + BATCH_SIZE]
+        batch_metas = metadatas[i:i + BATCH_SIZE]
+        batch_ids = ids[i:i + BATCH_SIZE]
+        
+        collection.add(
+            documents=batch_docs,
+            metadatas=batch_metas,
+            ids=batch_ids
+        )
+        print(f"Indexed batch {i//BATCH_SIZE + 1}...")
 
 if __name__ == "__main__":
     docs = load_documents()

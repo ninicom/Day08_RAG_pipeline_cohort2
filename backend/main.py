@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import json
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -20,7 +21,7 @@ from pydantic import BaseModel, Field
 
 from src.task5_semantic_search import semantic_search
 from src.task6_lexical_search import lexical_search
-from src.task10_generation import generate_with_citation
+from src.task10_generation import generate_with_citation, generate_hyde_document
 from src.task8_pageindex_vectorless import pageindex_search
 from src.task9_retrieval_pipeline import retrieve
 
@@ -31,6 +32,24 @@ PROJECT_ROOT = Path(__file__).parent.parent
 UPLOAD_LANDING_DIR = PROJECT_ROOT / "data" / "landing" / "uploads"
 UPLOAD_STANDARDIZED_DIR = PROJECT_ROOT / "data" / "standardized" / "uploads"
 GOLDEN_DATASET_PATH = PROJECT_ROOT / "group_project" / "evaluation" / "golden_dataset.json"
+SESSION_FILE = PROJECT_ROOT / "data" / "sessions.json"
+
+def load_sessions():
+    if SESSION_FILE.exists():
+        try:
+            return json.loads(SESSION_FILE.read_text(encoding="utf-8"))
+        except Exception as e:
+            logger.error("Failed to load sessions: %s", e)
+    return {}
+
+def save_sessions():
+    try:
+        SESSION_FILE.parent.mkdir(parents=True, exist_ok=True)
+        SESSION_FILE.write_text(json.dumps(session_store, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as e:
+        logger.error("Failed to save sessions: %s", e)
+
+session_store = load_sessions()
 ALLOWED_UPLOAD_EXTENSIONS = {".pdf", ".doc", ".docx", ".txt", ".md", ".html", ".htm", ".json"}
 ALLOWED_UPLOAD_CONTENT_TYPES = {
     "application/pdf",
@@ -62,6 +81,7 @@ class GenerateRequest(BaseModel):
 
 class ChatRequest(BaseModel):
     query: str = Field(..., min_length=1, description="Question from the chatbot UI")
+    sessionId: str | None = Field(None, description="Optional session ID for memory")
     useHyDE: bool = Field(False, description="Enable Hypothetical Document Embeddings")
     useReranking: bool = Field(True, description="Enable Reranking")
     topK: int = Field(5, ge=1, le=20, description="Maximum number of source chunks")
@@ -106,6 +126,7 @@ class GenerateResponse(BaseModel):
 
 class ChatResponse(BaseModel):
     answer: str
+    session_id: str | None = None
     sources: list[SourceChunk]
 
 
@@ -286,7 +307,6 @@ def search(request: SearchRequest) -> SearchResponse:
             request.query,
             top_k=request.top_k,
             score_threshold=request.score_threshold,
-            use_reranking=request.use_reranking,
         )
     except Exception as exc:
         logger.exception("AI_SEARCH_ERROR query=%r", request.query)
@@ -300,7 +320,10 @@ def search(request: SearchRequest) -> SearchResponse:
 def generate(request: GenerateRequest) -> GenerateResponse:
     logger.info("AI_GENERATE_START query=%r top_k=%s", request.query, request.top_k)
     try:
-        result = generate_with_citation(request.query, top_k=request.top_k)
+        chunks = retrieve(request.query, top_k=request.top_k)
+        result = generate_with_citation(request.query, context_chunks=chunks)
+        result["sources"] = chunks
+        result["retrieval_source"] = chunks[0].get("source", "none") if chunks else "none"
     except Exception as exc:
         logger.exception("AI_GENERATE_ERROR query=%r", request.query)
         raise HTTPException(status_code=500, detail=f"Generation failed: {exc}") from exc
@@ -335,9 +358,14 @@ def chat(
     x_qdrant_key: str | None = Header(default=None, alias="X-Qdrant-Key"),
 ) -> ChatResponse:
     """Frontend-friendly chatbot endpoint following the API spec document."""
+    session_id = request.sessionId or str(uuid.uuid4())
+    if session_id not in session_store:
+        session_store[session_id] = []
+        
     logger.info(
-        "AI_CHAT_START query=%r topK=%s threshold=%s mode=%r hyde=%s openai_key=%s qdrant_key=%s",
+        "AI_CHAT_START query=%r sessionId=%r topK=%s threshold=%s mode=%r hyde=%s reranking=%s openai_key=%s qdrant_key=%s",
         request.query,
+        session_id,
         request.topK,
         request.threshold,
         request.searchMode,
@@ -346,28 +374,40 @@ def chat(
         bool(x_openai_key),
         bool(x_qdrant_key),
     )
+    
+    retrieval_query = request.query
+    if request.useHyDE:
+        logger.info("Using HyDE to generate hypothetical document...")
+        retrieval_query = generate_hyde_document(request.query, history=session_store[session_id])
+        logger.info("HyDE generated document: %s...", retrieval_query[:50])
+
     method = request.searchMode.strip().lower()
     
     if method in {"hybrid", "hybrid kết hợp"}:
-        chunks = retrieve(request.query, top_k=request.topK, score_threshold=request.threshold, use_hyde=request.useHyDE, use_reranking=request.useReranking, api_key=x_openai_key)
+        chunks = retrieve(retrieval_query, top_k=request.topK, score_threshold=request.threshold, use_reranking=request.useReranking)
     elif method in {"semantic", "semantic ngữ nghĩa"}:
-        chunks = semantic_search(request.query, top_k=request.topK)
+        chunks = semantic_search(retrieval_query, top_k=request.topK)
     elif method in {"lexical", "lexical từ khóa"}:
-        chunks = lexical_search(request.query, top_k=request.topK)
+        chunks = lexical_search(retrieval_query, top_k=request.topK)
     elif method in {"pageindex", "pageindex vectorless"}:
-        chunks = pageindex_search(request.query, top_k=request.topK)
+        chunks = pageindex_search(retrieval_query, top_k=request.topK)
     else:
-        chunks = retrieve(request.query, top_k=request.topK, score_threshold=request.threshold, use_hyde=request.useHyDE, use_reranking=request.useReranking, api_key=x_openai_key)
+        chunks = retrieve(retrieval_query, top_k=request.topK, score_threshold=request.threshold, use_reranking=request.useReranking)
 
     result = generate_with_citation(
         request.query, 
-        top_k=request.topK, 
-        chunks=chunks, 
-        api_key=x_openai_key
+        context_chunks=chunks,
+        history=session_store[session_id]
     )
+    result["sources"] = chunks
     sources = _with_ids(result.get("sources", []))
+    
+    session_store[session_id].append({"role": "user", "content": request.query})
+    session_store[session_id].append({"role": "assistant", "content": result.get("answer", "")})
+    save_sessions()
+    
     logger.info("AI_CHAT_DONE query=%r sources=%s", request.query, len(sources))
-    return ChatResponse(answer=result.get("answer", ""), sources=sources)
+    return ChatResponse(answer=result.get("answer", ""), session_id=session_id, sources=sources)
 
 
 @app.post("/api/retrieval", response_model=RetrievalResponse, tags=["Frontend Contract"])
