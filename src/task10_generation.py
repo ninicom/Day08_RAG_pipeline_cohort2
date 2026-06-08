@@ -6,8 +6,8 @@ load_dotenv()
 
 SYSTEM_PROMPT = """Answer the following question comprehensively.
 For every statement of fact or claim, immediately insert a citation
-in brackets linking to the specific source
-(e.g., [Author/Platform Name, Year]).
+in brackets linking to the specific source (e.g., [Author/Platform Name]).
+IMPORTANT: Do NOT hallucinate or guess publication years. Only include the year if it is explicitly written in the provided context.
 If the information is not explicitly stated in the provided context
 or knowledge base, state 'I cannot verify this information'
 rather than guessing."""
